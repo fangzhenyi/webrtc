@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>GetUserMedia实例</title>
+</head>
+
+<body>
+    <div class="head">
+        <h1>WebRtc测试demo</h1>
+    </div>
+    <div class="info">
+        <label>我的名字</label>
+        <input type="text" id="from">
+        <button id="myname">报告我的名字</button>
+        <label>想要连接的用户</label>
+        <input type="text" id="to">
+        <button id="start">开始连接</button>
+    </div>
+    <div class="" style="margin-top: 30px;">
+        <div class="left" style="float: left;width:40%;"> 本地视频
+            <br/>
+            <video id="video" autoplay style="width: 80%;"></video>
+        </div>
+        <div class="right" style="float: left;width: 40%;">
+            远程视频
+            <br/>
+            <video id="remote" autoplay style="width:80%"></video>
+        </div>
+    </div>
+    </div>
+</body>
+<script type="text/javascript">
+
+console.log(window.location.href.substring(window.location.protocol.length));
+
+var video = document.getElementById('video');
+
+var remoteVideo = document.getElementById("remote");
+
+var myNameButton = document.getElementById("myname");
+
+var startButton = document.getElementById("start");
+//建立socket
+var socket = new WebSocket("ws://192.168.1.113:3002");
+
+
+var toUser;
+
+// RTCPeerConnection 选项
+var options = {
+  optional: [
+    // 实现 Chrome 和 Firefox 互通
+    {DtlsSrtpKeyAgreement: true},
+  ]
+};
+
+//兼容浏览器的getUserMedia写法
+var getUserMedia = (navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia);
+
+var nativeRTCIceCandidate = (window.mozRTCIceCandidate || window.RTCIceCandidate);
+var nativeRTCSessionDescription = (window.mozRTCSessionDescription || window.RTCSessionDescription); // order is very important: "RTCSessionDescription" defined in Nighly but useless
+
+var iceServer = {
+    "iceServers": [{
+        "url": "stun:stun.l.google.com:19302"
+            //"url": "stun:120.26.69.176:3478"
+    }]
+};
+
+var offerOptions = {
+    offerToReceiveAudio: 1,
+    offerToReceiveVideo: 1
+};
+
+//兼容浏览器的PeerConnection写法
+var PeerConnection = (window.PeerConnection ||
+    window.webkitPeerConnection00 ||
+    window.webkitRTCPeerConnection ||
+    window.mozRTCPeerConnection);
+//创建PeerConnection实例
+
+
+getUserMedia.call(navigator, {
+    "audio": true,
+    "video": true
+}, function(stream) {
+    if (window.URL) {
+        video.src = window.URL.createObjectURL(stream);
+    } else {
+        video.src = stream;
+    }
+    pc.addStream(stream);
+    video.autoplay = true;
+}, function(erro) {
+    console.log(erro);
+});
+
+var pc = new PeerConnection(iceServer,options);
+
+pc.onaddstream = function(event) {
+    if (window.URL) {
+        remoteVideo.src = window.URL.createObjectURL(event.stream);
+    } else {
+        remoteVideo.src = event.stream;
+    }
+    remoteVideo.autoplay = true;
+};
+
+
+pc.onicecandidate = function(event) {
+    if (!event.candidate) return;
+    socket.send(JSON.stringify({
+        "event": "candidate",
+        "data": event.candidate,
+        "to": toUser
+    }));
+
+   // pc.addIceCandidate(new nativeRTCIceCandidate(event.candidate));
+
+
+
+};
+
+
+socket.onmessage = function(message) {
+    console.log(message);
+    var message = JSON.parse(message.data);
+    var from = eval(document.getElementById('from')).value;
+    switch (message.event) {
+        case "call":
+            console.log("收到call创建answer");
+            pc.setRemoteDescription(new nativeRTCSessionDescription(message.sdp));
+            pc.createAnswer(function(session_desc) {
+
+                socket.send(JSON.stringify({
+                    "event": "answer",
+                    "sdp": session_desc,
+                    "from": from,
+                    "to": message.from
+                }));
+                toUser = message.from;
+                pc.setLocalDescription(session_desc);
+            }, function(error) {
+                console.log(error);
+            })
+
+            break;
+        case "answer":
+            to = message.from;
+            pc.setRemoteDescription(new nativeRTCSessionDescription(message.sdp));
+            break;
+        case "candidate":
+            pc.addIceCandidate(new nativeRTCIceCandidate(message.data));
+            break;
+
+    }
+
+
+};
+
+myNameButton.onclick = function() {
+    var from = eval(document.getElementById('from')).value;
+    socket.send(JSON.stringify({
+        "event": "join",
+        "name": from
+    }));
+}
+
+startButton.onclick = function() {
+    var from = eval(document.getElementById('from')).value;
+    var to = eval(document.getElementById('to')).value;
+    pc.createOffer(function(desc) {
+
+        console.log("开始创建offer");
+        socket.send(JSON.stringify({
+            "event": "call",
+            "sdp": desc,
+            "from": from,
+            "to": to
+        }));
+        toUser = to;
+        pc.setLocalDescription(desc);
+
+    }, function(erro) {
+
+    }, offerOptions);
+}
+</script>
+
+</html>
